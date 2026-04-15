@@ -24,11 +24,14 @@
             border-radius: 8px;
             overflow: hidden;
             box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+            /* Smooth transition when entering fullscreen */
+            transition: all 0.3s ease; 
         }
         video {
             width: 100%;
             height: auto;
             aspect-ratio: 16/9;
+            display: block;
         }
         .controls {
             margin-top: 20px;
@@ -48,13 +51,40 @@
             width: 100%;
             cursor: pointer;
         }
+        .btn-fullscreen {
+            padding: 12px;
+            font-size: 16px;
+            border-radius: 4px;
+            border: none;
+            background-color: #007bff;
+            color: white;
+            cursor: pointer;
+            font-weight: bold;
+            transition: background 0.2s;
+        }
+        .btn-fullscreen:hover {
+            background-color: #0056b3;
+        }
         .status {
             color: #aaa;
             font-size: 14px;
+            text-align: center;
         }
         .error {
             color: #ff4d4d;
             font-weight: bold;
+        }
+
+        /* Adjustments for when the container actually goes fullscreen */
+        .player-container:fullscreen {
+            max-width: 100%;
+            border-radius: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .player-container:fullscreen video {
+            height: 100%;
         }
     </style>
 </head>
@@ -62,11 +92,13 @@
 
     <h2>India IPTV Player</h2>
     
-    <div class="player-container">
+    <div class="player-container" id="videoContainer">
         <video id="video" controls autoplay></video>
     </div>
 
     <div class="controls">
+        <button id="fullscreenBtn" class="btn-fullscreen">Enter Fullscreen</button>
+
         <label for="channelList"><strong>Select Channel:</strong></label>
         <select id="channelList" disabled>
             <option value="">Loading playlist...</option>
@@ -79,18 +111,20 @@
     <script>
         const playlistUrl = 'https://iptv-org.github.io/iptv/raw/in.m3u';
         const videoElement = document.getElementById('video');
+        const videoContainer = document.getElementById('videoContainer');
         const channelSelect = document.getElementById('channelList');
         const statusMessage = document.getElementById('statusMessage');
+        const fullscreenBtn = document.getElementById('fullscreenBtn');
         let player;
 
         // Initialize the Shaka Player App
         async function initApp() {
-            // Install built-in polyfills to patch browser incompatibilities
             shaka.polyfill.installAll();
 
             if (shaka.Player.isBrowserSupported()) {
                 initPlayer();
                 await loadPlaylist();
+                setupFullscreen();
             } else {
                 statusMessage.innerHTML = '<span class="error">Browser not supported!</span>';
             }
@@ -99,9 +133,45 @@
         // Initialize Shaka Player instance
         function initPlayer() {
             player = new shaka.Player(videoElement);
-
-            // Listen for errors from the Player
             player.addEventListener('error', onErrorEvent);
+        }
+
+        // Setup Fullscreen Logic
+        function setupFullscreen() {
+            fullscreenBtn.addEventListener('click', () => {
+                if (!document.fullscreenElement) {
+                    // Enter fullscreen
+                    if (videoContainer.requestFullscreen) {
+                        videoContainer.requestFullscreen();
+                    } else if (videoContainer.webkitRequestFullscreen) { /* Safari */
+                        videoContainer.webkitRequestFullscreen();
+                    } else if (videoContainer.msRequestFullscreen) { /* IE11 */
+                        videoContainer.msRequestFullscreen();
+                    }
+                } else {
+                    // Exit fullscreen
+                    if (document.exitFullscreen) {
+                        document.exitFullscreen();
+                    } else if (document.webkitExitFullscreen) { /* Safari */
+                        document.webkitExitFullscreen();
+                    } else if (document.msExitFullscreen) { /* IE11 */
+                        document.msExitFullscreen();
+                    }
+                }
+            });
+
+            // Listen for fullscreen changes to update the button text
+            document.addEventListener('fullscreenchange', updateFullscreenButton);
+            document.addEventListener('webkitfullscreenchange', updateFullscreenButton);
+            document.addEventListener('msfullscreenchange', updateFullscreenButton);
+        }
+
+        function updateFullscreenButton() {
+            if (document.fullscreenElement) {
+                fullscreenBtn.textContent = 'Exit Fullscreen';
+            } else {
+                fullscreenBtn.textContent = 'Enter Fullscreen';
+            }
         }
 
         // Fetch and parse the M3U playlist
@@ -120,7 +190,6 @@
                 populateDropdown(channels);
                 statusMessage.textContent = `Successfully loaded ${channels.length} channels.`;
                 
-                // Handle channel selection
                 channelSelect.addEventListener('change', (e) => {
                     const streamUrl = e.target.value;
                     if (streamUrl) {
@@ -128,7 +197,6 @@
                     }
                 });
 
-                // Auto-play the first channel if available
                 if (channels.length > 0) {
                     channelSelect.value = channels[0].url;
                     playStream(channels[0].url);
@@ -150,14 +218,12 @@
                 const line = lines[i].trim();
                 
                 if (line.startsWith('#EXTINF:')) {
-                    // Extract the channel name, which usually comes after the last comma
                     const infoParts = line.split(',');
                     currentChannel.name = infoParts.length > 1 ? infoParts.slice(1).join(',').trim() : 'Unknown Channel';
                 } else if (line && !line.startsWith('#')) {
-                    // If it's not empty and doesn't start with '#', it's a URL
                     currentChannel.url = line;
                     channels.push({ ...currentChannel });
-                    currentChannel = { name: '', url: '' }; // Reset for next channel
+                    currentChannel = { name: '', url: '' };
                 }
             }
             return channels;
@@ -182,13 +248,12 @@
                 await player.load(url);
                 statusMessage.textContent = 'Playing stream.';
             } catch (error) {
-                statusMessage.innerHTML = `<span class="error">Error loading stream: ${error.message}. This channel might be offline or blocked by CORS.</span>`;
+                statusMessage.innerHTML = `<span class="error">Error loading stream. This channel might be offline or blocked by CORS.</span>`;
                 console.error('Error code', error.code, 'object', error);
             }
         }
 
         function onErrorEvent(event) {
-            // Extract the shaka.util.Error object from the event
             statusMessage.innerHTML = `<span class="error">Player Error: ${event.detail.message || 'Stream failed to load.'}</span>`;
             console.error('Error code', event.detail.code, 'object', event.detail);
         }
